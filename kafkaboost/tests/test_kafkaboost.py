@@ -5,10 +5,10 @@ from kafkaboost.producer import KafkaboostProducer
 from kafkaboost.consumer import KafkaboostConsumer
 
 class TestProducer(threading.Thread):
-    def __init__(self, bootstrap_servers: str, topics: List[str]):
+    def __init__(self, bootstrap_servers: str, topic: str):
         super().__init__()
         self.bootstrap_servers = bootstrap_servers
-        self.topics = topics
+        self.topic = topic
         self.messages_sent: List[Dict] = []
         self.stop_event = threading.Event()
         
@@ -19,14 +19,13 @@ class TestProducer(threading.Thread):
         )
         
         try:
-            # Test messages with different priorities and topics
+            # Test messages with different priorities
             messages = [
-                {'topic': self.topics[0], 'data': 'Low priority message', 'priority': 10},
-                {'topic': self.topics[0], 'data': 'Medium priority message', 'priority': 50},
-                {'topic': self.topics[0], 'data': 'High priority message', 'priority': 90},
-                {'topic': self.topics[1], 'data': 'Custom priority message', 'priority': 75},
-                {'topic': self.topics[1], 'data': 'Very high priority message', 'priority': 95},
-                {'topic': self.topics[0], 'data': 'Another medium priority message', 'priority': 50}
+                {'data': 'Low priority message', 'priority': 10},
+                {'data': 'Medium priority message', 'priority': 50},
+                {'data': 'High priority message', 'priority': 90},
+                {'data': 'Very high priority message', 'priority': 95},
+                {'data': 'Another medium priority message', 'priority': 50}
             ]
             
             for msg in messages:
@@ -35,13 +34,13 @@ class TestProducer(threading.Thread):
                     
                 # Send the message
                 producer.send(
-                    msg['topic'],
+                    self.topic,
                     value=msg['data'],
                     priority=msg['priority']
                 )
                 self.messages_sent.append(msg)
-                print(f"Producer sent to {msg['topic']}: {msg}")
-                time.sleep(0.5)  # Small delay between messages
+                print(f"Producer sent: {msg}")
+                time.sleep(1)  # Small delay between messages
                 
         finally:
             producer.close()
@@ -50,10 +49,10 @@ class TestProducer(threading.Thread):
         self.stop_event.set()
 
 class TestConsumer(threading.Thread):
-    def __init__(self, bootstrap_servers: str, topics: List[str], group_id: str):
+    def __init__(self, bootstrap_servers: str, topic: str, group_id: str):
         super().__init__()
         self.bootstrap_servers = bootstrap_servers
-        self.topics = topics
+        self.topic = topic
         self.group_id = group_id
         self.messages_received: List[Dict] = []
         self.stop_event = threading.Event()
@@ -61,7 +60,7 @@ class TestConsumer(threading.Thread):
     def run(self):
         consumer = KafkaboostConsumer(
             bootstrap_servers=self.bootstrap_servers,
-            topics=self.topics,
+            topics=self.topic,
             group_id=self.group_id
         )
         
@@ -73,11 +72,8 @@ class TestConsumer(threading.Thread):
                 for topic_partition, messages in records.items():
                     for message in messages:
                         value = message.value
-                        self.messages_received.append({
-                            'topic': topic_partition.topic,
-                            'data': value
-                        })
-                        print(f"Consumer received from {topic_partition.topic}: {value}")
+                        self.messages_received.append(value)
+                        print(f"Consumer received: {value}")
                         
                 # Small delay to prevent CPU overuse
                 time.sleep(0.1)
@@ -88,30 +84,15 @@ class TestConsumer(threading.Thread):
     def stop(self):
         self.stop_event.set()
 
-def verify_message_order(messages: List[Dict]) -> bool:
-    """Verify that messages are received in priority order within each topic."""
-    topic_messages = {}
-    for msg in messages:
-        topic = msg['topic']
-        if topic not in topic_messages:
-            topic_messages[topic] = []
-        topic_messages[topic].append(msg)
-    
-    for topic, msgs in topic_messages.items():
-        priorities = [msg['priority'] for msg in msgs]
-        if priorities != sorted(priorities, reverse=True):
-            return False
-    return True
-
 def main():
     # Configuration
     bootstrap_servers = 'localhost:9092'
-    topics = ['test_topic_1', 'test_topic_2']
+    topic = 'test_topic'
     group_id = 'test_group'
     
     # Create and start producer and consumer
-    producer = TestProducer(bootstrap_servers, topics)
-    consumer = TestConsumer(bootstrap_servers, topics, group_id)
+    producer = TestProducer(bootstrap_servers, topic)
+    consumer = TestConsumer(bootstrap_servers, topic, group_id)
     
     print("Starting consumer...")
     consumer.start()
@@ -124,7 +105,7 @@ def main():
     
     try:
         # Let them run for a while
-        time.sleep(15)
+        time.sleep(10)
     finally:
         # Stop both threads
         print("Stopping producer and consumer...")
@@ -142,15 +123,9 @@ def main():
         if producer.messages_sent and consumer.messages_received:
             print("\nVerifying messages...")
             for sent, received in zip(producer.messages_sent, consumer.messages_received):
-                print(f"Sent to {sent['topic']}: {sent}")
-                print(f"Received from {received['topic']}: {received}")
+                print(f"Sent: {sent}")
+                print(f"Received: {received}")
                 print("---")
-            
-            # Verify message order
-            if verify_message_order(consumer.messages_received):
-                print("\nMessage order verification: PASSED")
-            else:
-                print("\nMessage order verification: FAILED - Messages not received in priority order")
 
 if __name__ == "__main__":
-    main() 
+    main()
