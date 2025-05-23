@@ -7,7 +7,7 @@ from kafkaboost.consumer import KafkaboostConsumer
 class TestProducer(threading.Thread):
     def __init__(self, bootstrap_servers: str, topic: str):
         super().__init__()
-        self.bootstrap_servers = bootstrap_servers
+        self .bootstrap_servers = bootstrap_servers
         self.topic = topic
         self.messages_sent: List[Dict] = []
         self.stop_event = threading.Event()
@@ -40,7 +40,7 @@ class TestProducer(threading.Thread):
                 )
                 self.messages_sent.append(msg)
                 print(f"Producer sent: {msg}")
-                time.sleep(1)  # Small delay between messages
+              
                 
         finally:
             producer.close()
@@ -49,10 +49,10 @@ class TestProducer(threading.Thread):
         self.stop_event.set()
 
 class TestConsumer(threading.Thread):
-    def __init__(self, bootstrap_servers: str, topic: str, group_id: str):
+    def __init__(self, bootstrap_servers: str, topics: List[str], group_id: str):
         super().__init__()
         self.bootstrap_servers = bootstrap_servers
-        self.topic = topic
+        self.topics = topics
         self.group_id = group_id
         self.messages_received: List[Dict] = []
         self.stop_event = threading.Event()
@@ -60,7 +60,7 @@ class TestConsumer(threading.Thread):
     def run(self):
         consumer = KafkaboostConsumer(
             bootstrap_servers=self.bootstrap_servers,
-            topics=self.topic,
+            topics=self.topics,
             group_id=self.group_id
         )
         
@@ -69,11 +69,11 @@ class TestConsumer(threading.Thread):
                 # Poll for messages
                 records = consumer.poll(timeout_ms=1000)
                 
-                for topic_partition, messages in records.items():
-                    for message in messages:
-                        value = message.value
-                        self.messages_received.append(value)
-                        print(f"Consumer received: {value}")
+
+                for message in records:
+                    value = message.value
+                    self.messages_received.append(value)
+                    print(f"Consumer received: {value}")
                         
                 # Small delay to prevent CPU overuse
                 time.sleep(0.1)
@@ -87,12 +87,12 @@ class TestConsumer(threading.Thread):
 def main():
     # Configuration
     bootstrap_servers = 'localhost:9092'
-    topic = 'test_topic'
+    topics = ['test_topic_1', 'test_topic_2']  # Using two topics
     group_id = 'test_group'
     
     # Create and start producer and consumer
-    producer = TestProducer(bootstrap_servers, topic)
-    consumer = TestConsumer(bootstrap_servers, topic, group_id)
+    producer = TestProducer(bootstrap_servers, topics[0])  # Producer sends to first topic
+    consumer = TestConsumer(bootstrap_servers, topics, group_id)  # Consumer subscribes to both topics
     
     print("Starting consumer...")
     consumer.start()

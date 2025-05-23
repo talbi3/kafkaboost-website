@@ -33,7 +33,7 @@ class KafkaboostConsumer(KafkaConsumer):
         super().__init__(
             bootstrap_servers=bootstrap_servers,
             group_id=group_id,
-            value_deserializer=lambda v: json.loads(v.decode('utf-8')),
+            value_deserializer=lambda v: json.loads(v.decode('utf-8')) if isinstance(v, bytes) else v
             **kwargs
         )
         
@@ -44,22 +44,29 @@ class KafkaboostConsumer(KafkaConsumer):
         self._iterator = None
         self._consumer_timeout = float('inf')
         self._last_poll_time = datetime.now().timestamp()
+        self.max_priority =100;
         
-    def _process_priority_messages(self, records: Dict) -> List:
-        """Process all records from all partitions and return one priority-sorted list."""
+    def _process_priority_messages(self, records: Dict) -> Dict:
+        """Process all records from all partitions and return a dictionary mapping topics to a list of records sorted by priority using bucket sort."""
         print("Processing priority messages...")
-        all_messages = []
+        result = {}
+
+        # Create a queue for each priority level
+        queues = [[] for _ in range(self.max_priority + 1)]
 
         for tp, messages in records.items():
             for message in messages:
                 priority = message.value.get("priority", 0)
-                all_messages.append((priority, message))
-        
-        # Sort messages by priority descending
-        sorted_messages = sorted(all_messages, key=lambda x: x[0], reverse=True)
+                # Remove priority from the message value
+                if "priority" in message.value:
+                    del message.value["priority"]
+                queues[priority].append(message)
+            # Combine queues in descending order of priority
+        sorted_messages = []
+        for queue in reversed(queues):
+            sorted_messages.extend(queue)
 
-        # Return just the sorted message list (you can re-group by tp if needed later)
-        return [msg for _, msg in sorted_messages]
+        return sorted_messages
 
     
     def poll(
@@ -80,6 +87,7 @@ class KafkaboostConsumer(KafkaConsumer):
             List of messages sorted by priority and timestamp
         """
         # Get raw messages from parent class
+        print("Polling for messages in priority order...")
         raw_records = super().poll(
             timeout_ms=timeout_ms,
             max_records=max_records,

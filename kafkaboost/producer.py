@@ -83,10 +83,4 @@ class KafkaboostProducer(KafkaProducer):
         # Call parent's send method with the modified message
         return super().send(topic, value=message_dict, key=key, **kwargs)
     
-    def flush(self) -> None:
-        """Flush any pending messages."""
-        self.producer.flush()
-    
-    def close(self) -> None:
-        """Close the producer."""
-        self.producer.close() 
+ 
