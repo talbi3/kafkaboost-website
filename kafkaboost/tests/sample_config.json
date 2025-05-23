@@ -1,28 +1,28 @@
 {
   "user_id": "abc123",
   "hash_code": "def456",
-  "max_priority": 100,
-  "default_priority": 50,
+  "max_priority": 10,
+  "default_priority": 0,
   "Topics_priority": [
     {
       "topic": "topic1",
-      "priority": 75
+      "priority": 7
     },
     {
       "topic": "topic2",
-      "priority": 60
+      "priority": 6
     }
   ],
   "Rule_Base_priority": [
     {
       "role_name": "admin",
       "value": "high",
-      "priority": 90
+      "priority": 9
     },
     {
       "role_name": "user",
       "value": "medium",
-      "priority": 50
+      "priority": 5
     }
   ],
   "Priority_boost": [
