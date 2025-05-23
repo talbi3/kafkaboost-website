@@ -24,5 +24,15 @@
       "value": "medium",
       "priority": 50
     }
+  ],
+  "Priority_boost": [
+    {
+      "topic_name": "topic1",
+      "priority_boost_min_value": 10
+    },
+    {
+      "topic_name": "topic2",
+      "priority_boost_min_value": 5
+    }
   ]
 } 
