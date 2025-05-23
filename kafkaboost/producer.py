@@ -6,7 +6,7 @@ class KafkaboostProducer(KafkaProducer):
     def __init__(
         self,
         bootstrap_servers: Union[str, list],
-        priority: int = 0,
+        config_file: Optional[str] = None,
         **kwargs: Any
     ):
         """
@@ -14,13 +14,16 @@ class KafkaboostProducer(KafkaProducer):
         
         Args:
             bootstrap_servers: Kafka server address(es)
-            priority: Message priority (0-100, where 0 is lowest priority)
+            config_file: Path to the JSON configuration file
             **kwargs: Additional arguments to pass to KafkaProducer
         """
-        if not isinstance(priority, int) or priority < 0 or priority > 100:
-            raise ValueError("Priority must be an integer between 0 and 100")
-            
-        self.priority = priority
+        self.config = {}
+        if config_file:
+            with open(config_file, 'r') as f:
+                self.config = json.load(f)
+        
+        self.max_priority = self.config.get('max_priority', 10)
+        self.default_priority = self.config.get('default_priority', 0)
         
         # Initialize the parent KafkaProducer with value serializer
         super().__init__(
@@ -82,5 +85,34 @@ class KafkaboostProducer(KafkaProducer):
         
         # Call parent's send method with the modified message
         return super().send(topic, value=message_dict, key=key, **kwargs)
+    
+    def _add_priority_by_role(self, message_dict: dict, topic: str) -> dict:
+        """
+        Add priority to the message based on the role and topic.
+        
+        Args:
+            message_dict: The message dictionary to which priority will be added
+            topic: The topic name
+            
+        Returns:
+            dict: Message dictionary with priority added based on role and topic
+        """
+        # Check if the message contains a role
+        role = message_dict.get('role')
+        if role:
+            for rule in self.config.get('Rule_Base_priority', []):
+                if rule['role_name'] == role:
+                    message_dict['priority'] = rule['priority']
+                    return message_dict
+        
+        # If no role is found or no matching rule, check topic priority
+        for topic_rule in self.config.get('Topics_priority', []):
+            if topic_rule['topic'] == topic:
+                message_dict['priority'] = topic_rule['priority']
+                return message_dict
+        
+        # If no matching topic, use default priority
+        message_dict['priority'] = self.default_priority
+        return message_dict
     
  
