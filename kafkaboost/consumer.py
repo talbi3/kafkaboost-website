@@ -15,6 +15,7 @@ class KafkaboostConsumer(KafkaConsumer):
         topics: Union[str, List[str]],
         group_id: Optional[str] = None,
         number_of_messages: Optional[int] = None,
+        config_file: Optional[str] = None,
         **kwargs: Any
     ):
         """
@@ -26,6 +27,7 @@ class KafkaboostConsumer(KafkaConsumer):
             group_id: Consumer group ID
             **kwargs: Additional arguments to pass to KafkaConsumer
         """
+        print("Initializing KafkaboostConsumer...")
         # Convert single topic to list
         topics_list = [topics] if isinstance(topics, str) else topics
         
@@ -33,9 +35,10 @@ class KafkaboostConsumer(KafkaConsumer):
         super().__init__(
             bootstrap_servers=bootstrap_servers,
             group_id=group_id,
-            value_deserializer=lambda v: json.loads(v.decode('utf-8')) if isinstance(v, bytes) else v
+            value_deserializer=lambda v: json.loads(v.decode('utf-8')) if isinstance(v, bytes) else v,
             **kwargs
         )
+        print("KafkaboostConsumer initialized")
         
         # Subscribe to topics
         self.subscribe(topics_list)
@@ -44,30 +47,34 @@ class KafkaboostConsumer(KafkaConsumer):
         self._iterator = None
         self._consumer_timeout = float('inf')
         self._last_poll_time = datetime.now().timestamp()
-        self.max_priority =100;
-        
-    def _process_priority_messages(self, records: Dict) -> Dict:
-        """Process all records from all partitions and return a dictionary mapping topics to a list of records sorted by priority using bucket sort."""
-        print("Processing priority messages...")
-        result = {}
 
-        # Create a queue for each priority level
+        self.config = {}
+        if config_file:
+            with open(config_file, 'r') as f:
+                """NEEDS TO BE CHANGED"""
+                self.config = json.load(f)
+        
+        self.max_priority = self.config.get('max_priority', 10)
+
+    def _process_priority_messages(self, records: Dict) -> List:
+        print("Processing priority messages...")
+
         queues = [[] for _ in range(self.max_priority + 1)]
 
         for tp, messages in records.items():
             for message in messages:
                 priority = message.value.get("priority", 0)
-                # Remove priority from the message value
-                if "priority" in message.value:
-                    del message.value["priority"]
+                # if "priority" in message.value:
+                    # del message.value["priority"]
+                print(f"Priority: {priority}")
                 queues[priority].append(message)
-            # Combine queues in descending order of priority
+
         sorted_messages = []
         for queue in reversed(queues):
             sorted_messages.extend(queue)
 
+        print(f"Sorted {len(sorted_messages)} messages by priority.")
         return sorted_messages
-
     
     def poll(
         self,
