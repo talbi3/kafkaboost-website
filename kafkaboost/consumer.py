@@ -25,6 +25,7 @@ class KafkaboostConsumer(KafkaConsumer):
             bootstrap_servers: Kafka server address(es)
             topics: Topic(s) to consume from
             group_id: Consumer group ID
+            config_file: Optional path to config file containing priority settings
             **kwargs: Additional arguments to pass to KafkaConsumer
         """
         print("Initializing KafkaboostConsumer...")
@@ -48,13 +49,12 @@ class KafkaboostConsumer(KafkaConsumer):
         self._consumer_timeout = float('inf')
         self._last_poll_time = datetime.now().timestamp()
 
-        self.config = {}
+        # Load priority settings from config file if provided
+        self.max_priority = 10  # Default max priority
         if config_file:
             with open(config_file, 'r') as f:
-                """NEEDS TO BE CHANGED"""
-                self.config = json.load(f)
-        
-        self.max_priority = self.config.get('max_priority', 10)
+                config = json.load(f)
+                self.max_priority = config.get('max_priority', self.max_priority)
 
     def _process_priority_messages(self, records: Dict) -> List:
         print("Processing priority messages...")
@@ -64,16 +64,12 @@ class KafkaboostConsumer(KafkaConsumer):
         for tp, messages in records.items():
             for message in messages:
                 priority = message.value.get("priority", 0)
-                # if "priority" in message.value:
-                    # del message.value["priority"]
-                print(f"Priority: {priority}")
                 queues[priority].append(message)
 
         sorted_messages = []
         for queue in reversed(queues):
             sorted_messages.extend(queue)
 
-        print(f"Sorted {len(sorted_messages)} messages by priority.")
         return sorted_messages
     
     def poll(
@@ -146,9 +142,9 @@ class KafkaboostConsumer(KafkaConsumer):
 
     def _set_consumer_timeout(self):
         """Set the consumer timeout based on configuration."""
-        if self.config['consumer_timeout_ms'] >= 0:
+        if hasattr(self, 'consumer_timeout_ms') and self.consumer_timeout_ms >= 0:
             self._consumer_timeout = time.time() + (
-                self.config['consumer_timeout_ms'] / 1000.0)
+                self.consumer_timeout_ms / 1000.0)
 
     def close(self) -> None:
         """Close the consumer."""
