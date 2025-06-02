@@ -1,1 +1,33 @@
-{"Priority_boost": [{"topic_name": "test_topic", "priority_boost_min_value": 0}], "max_priority": 3}
+{
+  "user_id": "abc123",
+  "max_priority": 10,
+  "default_priority": 0,
+  "Topics_priority": [
+    {
+      "topic": "topic1",
+      "priority": 7
+    },
+    {
+      "topic": "topic2",
+      "priority": 6
+    }
+  ],
+  "Rule_Base_priority": [
+    {
+      "role_name": "admin",
+      "value": "high",
+      "priority": 9
+    },
+    {
+      "role_name": "user",
+      "value": "medium",
+      "priority": 5
+    }
+  ],
+  "Priority_boost": [
+    {
+        "topic_name": "test_topic",
+        "priority_boost_min_value": 5
+    }
+  ]
+} 
