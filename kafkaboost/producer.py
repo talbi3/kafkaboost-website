@@ -18,14 +18,15 @@ class KafkaboostProducer(KafkaProducer):
             config_file: Path to the JSON configuration file
             **kwargs: Additional arguments to pass to KafkaProducer
         """
-        self.config = {}
+        self.boost_config = {}
         if config_file:
             with open(config_file, 'r') as f:
                 """NEEDS TO BE CHANGED"""
-                self.config = json.load(f)
+                self.boost_config = json.load(f)
+
         
-        self.max_priority = self.config.get('max_priority', 10)
-        self.default_priority = self.config.get('default_priority', 0)
+        self.max_priority = self.boost_config.get('max_priority', 10)
+        self.default_priority = self.boost_config.get('default_priority', 0)
         
         # Initialize the parent KafkaProducer with value serializer
         super().__init__(
@@ -86,7 +87,8 @@ class KafkaboostProducer(KafkaProducer):
             FutureRecordMetadata
         """
         # Prepare message with priority
-        message_dict = self._prepare_message(value, priority)
+        message_dict = self._prepare_message(value, priority, topic)
+        topic = self.check_and_change_topic_by_priority(topic, message_dict['priority'])
         
         # Call parent's send method with the modified message
         return super().send(topic, value=message_dict, key=key, **kwargs)
@@ -105,17 +107,43 @@ class KafkaboostProducer(KafkaProducer):
         # Check if the message contains a role
         role = message_dict.get('role')
         if role:
-            for rule in self.config.get('Rule_Base_priority', []):
-                if rule['role_name'] == role:
-                    return rule['priority']
+            for role_config in self.boost_config.get('Rule_Base_priority', []):
+                if role_config['role_name'] == role:
+                    return role_config['priority']
         
         # If no role is found or no matching rule, check topic priority
-        for topic_rule in self.config.get('Topics_priority', []):
-            if topic_rule['topic'] == topic:
-                return topic_rule['priority']
+        for topic_config in self.boost_config.get('Topics_priority', []):
+            if topic_config['topic'] == topic:
+                return topic_config['priority']
         
         # If no matching topic, use default priority
-        return self.default_priority
+        return self.boost_config.get('default_priority', 0)
+    
+    def check_and_change_topic_by_priority(self, topic: str, priority: int) -> str:
+        """
+        Check if the topic is configured in Priority_boost and change topic name if priority meets minimum threshold.
+        
+        Args:
+            topic: The original topic name
+            priority: The priority value of the message
+            
+        Returns:
+            str: The modified topic name if priority boost applies, otherwise the original topic name
+        """
+        priority_config = self.boost_config.get('Priority_boost',[])
+        for topic_entry in priority_config:
+            topic_name = topic_entry.get("topic_name")
+            min_priority = topic_entry.get("priority_boost_min_value", 0)
+            # Check if this topic matches the Priority_boost configuration
+            if topic_name == topic:
+                # If priority equals or exceeds the minimum value, change topic name
+                if priority >= min_priority:
+                    modified_topic = f"{topic_name}_{priority}"
+                    return modified_topic
+                break
+        
+        # If no Priority_boost configuration found or priority doesn't meet threshold
+        return topic
     
 
       
