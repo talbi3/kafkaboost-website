@@ -1,10 +1,18 @@
 import time
 import threading
 import uuid
+import logging
 from kafkaboost.producer import KafkaboostProducer
 from kafkaboost.consumer import KafkaboostConsumer
 from kafka.admin import KafkaAdminClient, NewTopic
 import json
+from kafkaboost.kafka_utils import KafkaConfigManager
+
+# Disable Kafka connection logs
+logging.getLogger('kafka').setLevel(logging.WARNING)
+logging.getLogger('kafka.conn').setLevel(logging.WARNING)
+logging.getLogger('kafka.client').setLevel(logging.WARNING)
+logging.getLogger('kafkaboost').setLevel(logging.WARNING)
 
 TOPIC = "topic_1"
 TOPIC2 = "topic_2"
@@ -400,11 +408,62 @@ def small_test():
     print(f"Priority boost: {Priority_boost}")
 
 
+def test_find_matching_topics():
+    """
+    Simple test to verify find_matching_topics works with the existing sample_config.json
+    """
+    print("\n=== Testing find_matching_topics with sample_config.json ===")
+    
+    try:
+        print("starting.....")
+        # Initialize KafkaConfigManager with existing sample config
+        manager = KafkaConfigManager(BOOTSTRAP_SERVERS, CONFIG_FILE)
+        assert manager.connect(), "Failed to connect to Kafka"
+        
+        # Use find_matching_topics to get all test_topic variants
+        result = manager.find_matching_topics("test_topic")
+        print(f"Found topics for 'test_topic': {result}")
+        
+        test_topic_variants = result.get("test_topic", [])
+        print(f"Consumer will listen to these topics: {test_topic_variants}")
+        
+        # Create a consumer that listens to all test_topic variants
+        if test_topic_variants:
+            consumer = KafkaboostConsumer(
+                bootstrap_servers=BOOTSTRAP_SERVERS,
+                topics=test_topic_variants,
+                group_id=f"test_find_matching_{uuid.uuid4()}",
+                auto_offset_reset='earliest',
+                consumer_timeout_ms=5000
+            )
+            
+            print(f"Consumer subscription: {consumer.subscription()}")
+            print(f"Consumer assignment: {consumer.assignment()}")
+            
+            # Verify the consumer is listening to all the topics we found
+            subscription_topics = list(consumer.subscription())
+            assert set(subscription_topics) == set(test_topic_variants), \
+                f"Consumer should listen to {test_topic_variants}, but listens to {subscription_topics}"
+            
+            consumer.close()
+            print("✅ Consumer successfully subscribed to all test_topic variants!")
+        else:
+            print("⚠️  No test_topic variants found - this might be expected if topics don't exist yet")
+        
+        manager.close()
+        
+    except Exception as e:
+        print(f"❌ Test failed with error: {e}")
+        raise
+
+
 if __name__ == "__main__":
     # print("Running single topic test...")
     # test_priority_order()
     # print("\nRunning multi-topic test...")
     # test_priority_order_multi_topic()
     # small_test()
-    print("\nRunning priority boost topic routing test...")
-    test_priority_boost_topic_routing()
+    # print("\nRunning priority boost topic routing test...")
+    # test_priority_boost_topic_routing()
+    print("\nRunning find_matching_topics test...")
+    test_find_matching_topics()

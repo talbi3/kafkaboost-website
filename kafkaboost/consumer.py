@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import time
 from collections import defaultdict
+from kafkaboost.kafka_utils import KafkaConfigManager
 
 
 class KafkaboostConsumer(KafkaConsumer):
@@ -41,8 +42,19 @@ class KafkaboostConsumer(KafkaConsumer):
         )
         print("KafkaboostConsumer initialized")
         
-        # Subscribe to topics
-        self.subscribe(topics_list)
+        # Initialize KafkaConfigManager only if config_file is provided
+        self.kafka_config_manager = None
+        if config_file:
+            self.kafka_config_manager = KafkaConfigManager(
+                bootstrap_servers=bootstrap_servers,
+                config_file=config_file
+            )
+            boost_topics = self.kafka_config_manager.find_matching_topics(topics_list)
+            # Subscribe to topics
+            self.subscribe(topics_list)
+        else:
+            # Subscribe to topics directly if no config file
+            self.subscribe(topics_list)
         
         # Initialize iterator-related variables
         self._iterator = None

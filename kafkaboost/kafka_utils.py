@@ -163,6 +163,56 @@ class KafkaConfigManager:
             logger.error(f"Error listing topics: {str(e)}")
             return []
             
+    def find_matching_topics(self, base_topics: Union[str, List[str]]) -> Dict[str, List[str]]:
+        """
+        Find all topics that match the given base topic names, including priority variants.
+        
+        Args:
+            base_topics: Single base topic name or list of base topic names
+            
+        Returns:
+            Dictionary mapping base topic names to lists of matching topics (including priority variants)
+            
+        Example:
+            Input: "test_topic"
+            If Kafka has topics: ["test_topic", "test_topic_7", "test_topic_8", "topic1"]
+            Output: {"test_topic": ["test_topic", "test_topic_7", "test_topic_8"]}
+        """
+        if not self.admin_client:
+            if not self.connect():
+                return {}
+                
+        # Normalize input to list
+        base_topic_list = [base_topics] if isinstance(base_topics, str) else base_topics
+        
+        try:
+            # Get all existing topics
+            all_topics = self._get_existing_topics()
+            
+            result = {}
+            for base_topic in base_topic_list:
+                matching_topics = []
+                
+                # Find exact matches and priority variants
+                for topic in all_topics:
+                    # Exact match
+                    if topic == base_topic:
+                        matching_topics.append(topic)
+                    # Priority variant match (base_topic_priority_number)
+                    elif topic.startswith(f"{base_topic}_"):
+                        # Check if the suffix is a number (priority)
+                        suffix = topic[len(f"{base_topic}_"):]
+                        if suffix.isdigit():
+                            matching_topics.append(topic)
+                
+                result[base_topic] = matching_topics
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error finding matching topics: {str(e)}")
+            return {base_topic: [] for base_topic in base_topic_list}
+            
     def close(self):
         """Close the admin client connection."""
         if self.admin_client:
