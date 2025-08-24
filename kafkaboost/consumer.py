@@ -7,6 +7,7 @@ from datetime import datetime
 import time
 from collections import defaultdict
 from kafkaboost.kafka_utils import KafkaConfigManager
+from .config_manager import ConfigManager
 
 
 class KafkaboostConsumer(KafkaConsumer):
@@ -16,7 +17,8 @@ class KafkaboostConsumer(KafkaConsumer):
         topics: Union[str, List[str]],
         group_id: Optional[str] = None,
         number_of_messages: Optional[int] = None,
-        config_file: Optional[str] = None,
+        config_file: Optional[str] = None,  
+        use_config_manager: bool = True,
         **kwargs: Any
     ):
         """
@@ -26,7 +28,8 @@ class KafkaboostConsumer(KafkaConsumer):
             bootstrap_servers: Kafka server address(es)
             topics: Topic(s) to consume from
             group_id: Consumer group ID
-            config_file: Optional path to config file containing priority settings
+    
+            use_config_manager: Whether to use ConfigManager for configuration (default: True)
             **kwargs: Additional arguments to pass to KafkaConsumer
         """
         print("Initializing KafkaboostConsumer...")
@@ -41,6 +44,36 @@ class KafkaboostConsumer(KafkaConsumer):
             **kwargs
         )
         print("KafkaboostConsumer initialized")
+        
+        # Initialize ConfigManager if requested
+        self.use_config_manager = use_config_manager
+        self.config_manager = None
+        self.boost_config = {}
+        
+        if use_config_manager:
+            try:
+                self.config_manager = ConfigManager()
+                if config_file:
+                    # Load config from file if provided
+                    self.config_manager.load_config_from_file(config_file)
+                else:
+                    # Get config from server
+                    self.config_manager.get_config()
+                print("✓ Consumer initialized with ConfigManager")
+            except Exception as e:
+                print(f"Warning: Could not initialize ConfigManager: {str(e)}")
+                # Fall back to config file if ConfigManager fails
+                if config_file:
+                    self.config_manager = None
+                    with open(config_file, 'r') as f:
+                        self.boost_config = json.load(f)
+                else:
+                    self.boost_config = {}
+        else:
+            # Use config file directly (legacy mode)
+            if config_file:
+                with open(config_file, 'r') as f:
+                    self.boost_config = json.load(f)
         
         # Initialize KafkaConfigManager only if config_file is provided
         self.kafka_config_manager = None
@@ -61,12 +94,11 @@ class KafkaboostConsumer(KafkaConsumer):
         self._consumer_timeout = float('inf')
         self._last_poll_time = datetime.now().timestamp()
 
-        # Load priority settings from config file if provided
-        self.max_priority = 10  # Default max priority
-        if config_file:
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-                self.max_priority = config.get('max_priority', self.max_priority)
+        # Load priority settings from config
+        if self.use_config_manager and self.config_manager:
+            self.max_priority = self.config_manager.get_max_priority()
+        else:
+            self.max_priority = self.boost_config.get('max_priority', 10) if self.boost_config else 10
 
     def _process_priority_messages(self, records: Dict) -> List:
         print("Processing priority messages...")
@@ -157,6 +189,8 @@ class KafkaboostConsumer(KafkaConsumer):
         if hasattr(self, 'consumer_timeout_ms') and self.consumer_timeout_ms >= 0:
             self._consumer_timeout = time.time() + (
                 self.consumer_timeout_ms / 1000.0)
+
+   
 
     def close(self) -> None:
         """Close the consumer."""
