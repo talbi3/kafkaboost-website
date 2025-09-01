@@ -17,6 +17,7 @@ function App() {
   const [topics, setTopics] = useState([]);
   const [valRules, setValRules] = useState([]);
   const [priorityBoost, setPriorityBoost] = useState([]);
+  const [partitionValue, setPartitionValue] = useState('');
   const [defaultPriority, setDefaultPriority] = useState('');
   const [maxPriority, setMaxPriority] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -47,7 +48,7 @@ function App() {
         default_priority: parseInt(defaultPriority),
         Topics_priority: topics.filter(t => t.name && t.priority).map(t => ({ topic: t.name, priority: parseInt(t.priority) })),
         Rule_Base_priority: valRules.filter(v => v.val && v.priority && v.role_name).map(v => ({ role_name: v.role_name, value: v.val, priority: parseInt(v.priority) })),
-        Priority_boost: priorityBoost.map(b => ({ topic_name: b.topic_name, priority_boost_min_value: parseInt(b.priority_boost_min_value) }))
+        Priority_boost: priorityBoost.map(b => ({ topic_name: b.topic_name, priority_boost_min_value: parseInt(b.priority_boost_min_value),number_of_partitions: parseInt(b.number_of_partitions || '0')  }))
       };
 
       const success = await saveSettingsToCloud(settings);
@@ -117,7 +118,7 @@ function App() {
 
       setTopics((loaded.Topics_priority || []).map(t => ({ name: t.topic, priority: t.priority.toString() })));
       setValRules((loaded.Rule_Base_priority || []).map(r => ({ role_name: r.role_name || '', val: r.value, priority: r.priority.toString() })));
-      setPriorityBoost((loaded.Priority_boost || []).map(p => ({ topic_name: p.topic_name, priority_boost_min_value: p.priority_boost_min_value.toString() })));
+      setPriorityBoost((loaded.Priority_boost || []).map(p => ({ topic_name: p.topic_name, priority_boost_min_value: p.priority_boost_min_value.toString() , number_of_partitions: p.number_of_partitions?.toString() || '' })));
       setDefaultPriority(loaded.default_priority?.toString() || '');
       setMaxPriority(loaded.max_priority?.toString() || '');
       setStage('settings');
@@ -140,6 +141,18 @@ function App() {
     } catch (err) {
       console.error("❌ Failed to load version", err);
     }
+  };
+
+    const applyPartitionsToAll = () => {
+    if (!partitionValue || isNaN(parseInt(partitionValue))) {
+      setErrorMessage('❌ Please enter a valid number of partitions.');
+      return;
+    }
+    const updated = priorityBoost.map(p => ({
+      ...p,
+      number_of_partitions: partitionValue
+    }));
+    setPriorityBoost(updated);
   };
 
   return (
@@ -244,22 +257,34 @@ function App() {
             </table>
 
             {/* Priority Boost */}
-            <div className="table-header">
-              <h3>Priority Boost <button onClick={() => setPriorityBoost([...priorityBoost, { topic_name: '', priority_boost_min_value: '' }])} className="plus-button">➕</button></h3>
+             <div className="table-header">
+            <h3>Priority Boost <button onClick={() => setPriorityBoost([...priorityBoost, { topic_name: '', priority_boost_min_value: '', number_of_partitions: '' }])} className="plus-button">➕</button></h3>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+            <input
+            placeholder="Set All Partitions"
+            value={partitionValue}
+            onChange={(e) => setPartitionValue(e.target.value)}
+            className="input-style"
+            />
+            <button onClick={applyPartitionsToAll} className="button-style">Set All</button>
             </div>
             <table className="styled-table">
-              <thead><tr><th>Topic</th><th>Boost Min Value</th><th>Actions</th></tr></thead>
-              <tbody>
-                {priorityBoost.map((boost, index) => (
-                  <tr key={index}>
-                    <td><input value={boost.topic_name} onChange={(e) => {
-                      const updated = [...priorityBoost]; updated[index].topic_name = e.target.value; setPriorityBoost(updated);
-                    }} className="input-style" /></td>
-                    <td><input value={boost.priority_boost_min_value} onChange={(e) => {
-                      const updated = [...priorityBoost]; updated[index].priority_boost_min_value = e.target.value; setPriorityBoost(updated);
-                    }} className="input-style" /></td>
-                    <td><button className="delete-button" onClick={() => setPriorityBoost(priorityBoost.filter((_, i) => i !== index))}>Delete</button></td>
-                  </tr>
+            <thead><tr><th>Topic</th><th>Boost Min Value</th><th>Partitions</th><th>Actions</th></tr></thead>
+            <tbody>
+            {priorityBoost.map((boost, index) => (
+            <tr key={index}>
+            <td><input value={boost.topic_name} onChange={(e) => {
+            const updated = [...priorityBoost]; updated[index].topic_name = e.target.value; setPriorityBoost(updated);
+            }} className="input-style" /></td>
+            <td><input value={boost.priority_boost_min_value} onChange={(e) => {
+            const updated = [...priorityBoost]; updated[index].priority_boost_min_value = e.target.value; setPriorityBoost(updated);
+            }} className="input-style" /></td>
+            <td><input value={boost.number_of_partitions || ''} onChange={(e) => {
+            const updated = [...priorityBoost]; updated[index].number_of_partitions = e.target.value; setPriorityBoost(updated);
+            }} className="input-style" /></td>
+            <td><button className="delete-button" onClick={() => setPriorityBoost(priorityBoost.filter((_, i) => i !== index))}>Delete</button></td>
+            </tr>
                 ))}
               </tbody>
             </table>
