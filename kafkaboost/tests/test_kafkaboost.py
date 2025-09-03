@@ -506,17 +506,17 @@ def test_find_matching_topics():
 if __name__ == "__main__":
     print("Running S3 config manager integration tests...")
     
-    # print("\n=== Running small test (S3 config manager) ===")
-    # small_test()
+    print("\n=== Running small test (S3 config manager) ===")
+    small_test()
     
-    # print("\n=== Running find_matching_topics test ===")
-    # test_find_matching_topics()
+    print("\n=== Running find_matching_topics test ===")
+    test_find_matching_topics()
     
-    # print("\n=== Running priority boost topic routing test ===")
-    # test_priority_boost_topic_routing()
+    print("\n=== Running priority boost topic routing test ===")
+    test_priority_boost_topic_routing()
     
-    # print("\n=== Running single topic test ===")
-    # test_priority_order()
+    print("\n=== Running single topic test ===")
+    test_priority_order()
     
     print("\n=== Running multi-topic test ===")
     test_priority_order_multi_topic()
