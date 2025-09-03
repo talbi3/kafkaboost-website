@@ -7,7 +7,7 @@ from datetime import datetime
 import time
 from collections import defaultdict
 from kafkaboost.kafka_utils import KafkaConfigManager
-from .config_manager import ConfigManager
+from .s3_config_manager import S3ConfigManager
 
 
 class KafkaboostConsumer(KafkaConsumer):
@@ -18,7 +18,7 @@ class KafkaboostConsumer(KafkaConsumer):
         group_id: Optional[str] = None,
         number_of_messages: Optional[int] = None,
         config_file: Optional[str] = None,  
-        use_config_manager: bool = True,
+        user_id: Optional[str] = None,
         **kwargs: Any
     ):
         """
@@ -28,8 +28,8 @@ class KafkaboostConsumer(KafkaConsumer):
             bootstrap_servers: Kafka server address(es)
             topics: Topic(s) to consume from
             group_id: Consumer group ID
-    
-            use_config_manager: Whether to use ConfigManager for configuration (default: True)
+            config_file: Path to config file (optional if using S3)
+            user_id: User ID for S3 config manager (optional)
             **kwargs: Additional arguments to pass to KafkaConsumer
         """
         print("Initializing KafkaboostConsumer...")
@@ -45,49 +45,31 @@ class KafkaboostConsumer(KafkaConsumer):
         )
         print("KafkaboostConsumer initialized")
         
-        # Initialize ConfigManager if requested
-        self.use_config_manager = use_config_manager
-        self.config_manager = None
+        # Initialize configuration management
+        self.user_id = user_id
+        self.s3_config_manager = None
         self.boost_config = {}
         
-        if use_config_manager:
-            try:
-                self.config_manager = ConfigManager()
-                if config_file:
-                    # Load config from file if provided
-                    self.config_manager.load_config_from_file(config_file)
-                else:
-                    # Get config from server
-                    self.config_manager.get_config()
-                print("✓ Consumer initialized with ConfigManager")
-            except Exception as e:
-                print(f"Warning: Could not initialize ConfigManager: {str(e)}")
-                # Fall back to config file if ConfigManager fails
-                if config_file:
-                    self.config_manager = None
-                    with open(config_file, 'r') as f:
-                        self.boost_config = json.load(f)
-                else:
-                    self.boost_config = {}
-        else:
-            # Use config file directly (legacy mode)
-            if config_file:
-                with open(config_file, 'r') as f:
-                    self.boost_config = json.load(f)
-        
-        # Initialize KafkaConfigManager only if config_file is provided
-        self.kafka_config_manager = None
-        if config_file:
-            self.kafka_config_manager = KafkaConfigManager(
+     
+        try:
+            self.s3_config_manager = S3ConfigManager(user_id=user_id)
+            print("✓ Consumer initialized with S3ConfigManager")
+        except Exception as e:
+            print(f"Warning: Could not initialize S3ConfigManager: {str(e)}")
+
+        try:
+            self.kafka_utils_manager = KafkaConfigManager(
                 bootstrap_servers=bootstrap_servers,
-                config_file=config_file
+                user_id=user_id
             )
-            boost_topics = self.kafka_config_manager.find_matching_topics(topics_list)
-            # Subscribe to topics
-            self.subscribe(topics_list)
-        else:
-            # Subscribe to topics directly if no config file
-            self.subscribe(topics_list)
+            if self.kafka_utils_manager:
+                boost_topics = self.kafka_utils_manager.find_matching_topics(topics_list)
+                print(f"Found matching topics: {boost_topics}")
+        except Exception as e:
+                print(f"Warning: Could not initialize KafkaConfigManager: {str(e)}")
+        
+        # Subscribe to topics
+        self.subscribe(topics_list)
         
         # Initialize iterator-related variables
         self._iterator = None
@@ -95,10 +77,9 @@ class KafkaboostConsumer(KafkaConsumer):
         self._last_poll_time = datetime.now().timestamp()
 
         # Load priority settings from config
-        if self.use_config_manager and self.config_manager:
-            self.max_priority = self.config_manager.get_max_priority()
-        else:
-            self.max_priority = self.boost_config.get('max_priority', 10) if self.boost_config else 10
+        if self.s3_config_manager:
+            self.max_priority = self.s3_config_manager.get_max_priority()
+
 
     def _process_priority_messages(self, records: Dict) -> List:
         print("Processing priority messages...")
@@ -190,7 +171,33 @@ class KafkaboostConsumer(KafkaConsumer):
             self._consumer_timeout = time.time() + (
                 self.consumer_timeout_ms / 1000.0)
 
-   
+    def refresh_config(self):
+        """Refresh configuration from S3."""
+        if self.s3_config_manager:
+            try:
+                self.boost_config = self.s3_config_manager.get_full_config_for_consumer()
+                self.max_priority = self.s3_config_manager.get_max_priority()
+                print("✓ Configuration refreshed from S3")
+            except Exception as e:
+                print(f"Warning: Failed to refresh config from S3: {str(e)}")
+
+    def get_config_summary(self) -> dict:
+        """
+        Get a summary of the current configuration.
+        
+        Returns:
+            Dictionary with configuration summary
+        """
+        if self.s3_config_manager:
+            return self.s3_config_manager.get_config_summary()
+        else:
+            return {
+                'config_source': 'none',
+                'max_priority': self.max_priority,
+                'topics_count': len(self.boost_config.get('Topics_priority', [])),
+                'rules_count': len(self.boost_config.get('Rule_Base_priority', [])),
+                'boost_configs_count': len(self.boost_config.get('Priority_boost', []))
+            }
 
     def close(self) -> None:
         """Close the consumer."""

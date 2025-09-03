@@ -6,15 +6,24 @@ import boto3
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timedelta
 from botocore.exceptions import ClientError, NoCredentialsError
+
+
 class S3ConfigManager:
     """
     S3-based configuration manager that extends the base ConfigManager
     to fetch configuration from AWS S3 bucket.
     """
-    
+    AWSConfig = "kafkaboost/aws_config.json"
     def __init__(self, user_id: Optional[str] = None, auto_save_local: bool = True, local_file_path: str = "s3_config_local.json", 
-                 poll_interval: int = 300, enable_background_polling: bool = True, on_config_change: Optional[Callable] = None):
-        # Initialize S3-specific attributes
+                 poll_interval: int = 600, enable_background_polling: bool = True, on_config_change: Optional[Callable] = None,
+                 aws_config_file: Optional[str] = None):
+        # Load AWS credentials from config file first
+        if aws_config_file:
+            self._load_aws_credentials_from_file(aws_config_file)
+        else:
+            self._load_aws_credentials_from_file(self.AWSConfig)
+        
+        # Initialize S3-specific attributes after loading credentials
         self._s3_client = None
         self._bucket_name = os.getenv('S3_CONFIG_BUCKET')
         self._aws_region = os.getenv('AWS_REGION', 'us-east-1')
@@ -51,6 +60,15 @@ class S3ConfigManager:
         # Start background polling if enabled
         if self._enable_background_polling and user_id:
             self._start_background_polling()
+    
+    def _load_aws_credentials_from_file(self, aws_config_file: str):
+        """Load AWS credentials from the AWS config file."""
+        try:
+            from kafkaboost.aws_config import AWSConfig
+            aws_config = AWSConfig.from_file(aws_config_file)
+            print(f"✅ AWS credentials loaded from {aws_config_file}")
+        except Exception as e:
+            print(f"Warning: Could not load AWS credentials from {aws_config_file}: {str(e)}")
         
     def _initialize_s3_client(self):
         """Initialize the S3 client with credentials."""
@@ -302,13 +320,14 @@ class S3ConfigManager:
                 # Find files for this specific user
                 user_files = []
                 for obj in response['Contents']:
+                   #print(f"Checking object: {obj['Key']}")
                     if self._user_id in obj['Key']:
                         user_files.append(obj)
                 
                 if user_files:
                     # Get the most recent file
                     latest_file = max(user_files, key=lambda x: x['LastModified'])
-                    print(f"Found latest file for user {self._user_id}: {latest_file['Key']}")
+                    print(f"✓ Using latest file for user {self._user_id}: {latest_file['Key']}")
                     return latest_file['Key']
             
             return None
@@ -371,13 +390,19 @@ class S3ConfigManager:
                 
                 self._config_hash = current_hash
                 
-                # Wait for next poll interval
-                self._stop_polling.wait(self._poll_interval)
+                # Wait for next poll interval with shorter checks for shutdown
+                for _ in range(self._poll_interval):
+                    if self._stop_polling.is_set():
+                        break
+                    time.sleep(1)
                 
             except Exception as e:
                 print(f"Error in background polling: {str(e)}")
-                # Wait a bit before retrying
-                self._stop_polling.wait(60)  # Wait 1 minute on error
+                # Wait a bit before retrying, but check for shutdown more frequently
+                for _ in range(60):
+                    if self._stop_polling.is_set():
+                        break
+                    time.sleep(1)
     
     def is_polling_active(self) -> bool:
         """
@@ -415,6 +440,202 @@ class S3ConfigManager:
         self._fetch_config()
         print("✅ Config refresh completed")
     
+    # Configuration retrieval functions for kafka_utils, consumer, and producer
+    
+    def get_max_priority(self) -> int:
+        """
+        Get the maximum priority value from config.
+        
+        Returns:
+            Maximum priority value (default: 10)
+        """
+        config = self.get_config()
+        return config.get('max_priority', 10)
+    
+    def get_default_priority(self) -> int:
+        """
+        Get the default priority value from config.
+        
+        Returns:
+            Default priority value (default: 0)
+        """
+        config = self.get_config()
+        return config.get('default_priority', 0)
+    
+    def get_topics_priority(self) -> list:
+        """
+        Get the topics priority configuration.
+        
+        Returns:
+            List of topic priority configurations
+        """
+        config = self.get_config()
+        return config.get('Topics_priority', [])
+    
+    def get_rule_base_priority(self) -> list:
+        """
+        Get the rule-based priority configuration.
+        
+        Returns:
+            List of rule-based priority configurations
+        """
+        config = self.get_config()
+        return config.get('Rule_Base_priority', [])
+    
+    def get_priority_boost(self) -> list:
+        """
+        Get the priority boost configuration.
+        
+        Returns:
+            List of priority boost configurations
+        """
+        config = self.get_config()
+        return config.get('Priority_boost', [])
+    
+    def get_user_id(self) -> Optional[str]:
+        """
+        Get the user ID from config.
+        
+        Returns:
+            User ID if present, None otherwise
+        """
+        config = self.get_config()
+        return config.get('user_id')
+    
+    def get_topic_priority_by_name(self, topic_name: str) -> Optional[int]:
+        """
+        Get priority for a specific topic.
+        
+        Args:
+            topic_name: Name of the topic
+            
+        Returns:
+            Priority value for the topic, None if not found
+        """
+        topics_priority = self.get_topics_priority()
+        for topic_config in topics_priority:
+            if topic_config.get('topic') == topic_name:
+                return topic_config.get('priority')
+        return None
+    
+    def get_role_priority(self, role_name: str) -> Optional[int]:
+        """
+        Get priority for a specific role.
+        
+        Args:
+            role_name: Name of the role
+            
+        Returns:
+            Priority value for the role, None if not found
+        """
+        rule_base_priority = self.get_rule_base_priority()
+        for role_config in rule_base_priority:
+            if role_config.get('role_name') == role_name:
+                return role_config.get('priority')
+        return None
+    
+    def get_priority_boost_config(self, topic_name: str) -> Optional[dict]:
+        """
+        Get priority boost configuration for a specific topic.
+        
+        Args:
+            topic_name: Name of the topic
+            
+        Returns:
+            Priority boost configuration for the topic, None if not found
+        """
+        priority_boost = self.get_priority_boost()
+        for boost_config in priority_boost:
+            if boost_config.get('topic_name') == topic_name:
+                return boost_config
+        return None
+    
+    def get_priority_boost_min_value(self, topic_name: str) -> int:
+        """
+        Get the minimum priority value for boost for a specific topic.
+        
+        Args:
+            topic_name: Name of the topic
+            
+        Returns:
+            Minimum priority value for boost (default: 0)
+        """
+        boost_config = self.get_priority_boost_config(topic_name)
+        if boost_config:
+            return boost_config.get('priority_boost_min_value', 0)
+        return 0
+    
+    def get_full_config_for_kafka_utils(self) -> dict:
+        """
+        Get the complete configuration needed by kafka_utils.
+        
+        Returns:
+            Complete configuration dictionary
+        """
+        return self.get_config()
+    
+    def get_full_config_for_consumer(self) -> dict:
+        """
+        Get the complete configuration needed by consumer.
+        
+        Returns:
+            Complete configuration dictionary
+        """
+        return self.get_config()
+    
+    def get_full_config_for_producer(self) -> dict:
+        """
+        Get the complete configuration needed by producer.
+        
+        Returns:
+            Complete configuration dictionary
+        """
+        return self.get_config()
+    
+    def is_config_valid(self) -> bool:
+        """
+        Check if the current configuration is valid.
+        
+        Returns:
+            True if config is valid, False otherwise
+        """
+        try:
+            config = self.get_config()
+            # Basic validation - check if required fields exist
+            required_fields = ['max_priority', 'default_priority']
+            for field in required_fields:
+                if field not in config:
+                    return False
+            return True
+        except Exception:
+            return False
+    
+    def get_config_summary(self) -> dict:
+        """
+        Get a summary of the current configuration.
+        
+        Returns:
+            Dictionary with configuration summary
+        """
+        config = self.get_config()
+        return {
+            'user_id': config.get('user_id'),
+            'max_priority': config.get('max_priority'),
+            'default_priority': config.get('default_priority'),
+            'topics_count': len(config.get('Topics_priority', [])),
+            'rules_count': len(config.get('Rule_Base_priority', [])),
+            'boost_configs_count': len(config.get('Priority_boost', [])),
+            'last_updated': self._last_update.isoformat() if self._last_update else None,
+            'is_valid': self.is_config_valid()
+        }
+
     def __del__(self):
         """Cleanup when object is destroyed."""
+        try:
+            self._stop_background_polling()
+        except:
+            pass
+    
+    def close(self):
+        """Explicitly close and cleanup resources."""
         self._stop_background_polling()

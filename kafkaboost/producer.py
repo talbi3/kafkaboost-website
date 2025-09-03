@@ -2,12 +2,15 @@ from kafka import KafkaProducer
 from kafka.admin import KafkaAdminClient
 from typing import Any, Optional, Union
 import json
+from .s3_config_manager import S3ConfigManager
+
 
 class KafkaboostProducer(KafkaProducer):
     def __init__(
         self,
         bootstrap_servers: Union[str, list],
         config_file: Optional[str] = None,
+        user_id: Optional[str] = None,
         **kwargs: Any
     ):
         """
@@ -15,18 +18,23 @@ class KafkaboostProducer(KafkaProducer):
         
         Args:
             bootstrap_servers: Kafka server address(es)
-            config_file: Path to the JSON configuration file
+            config_file: Path to the JSON configuration file (optional if using S3)
+            user_id: User ID for S3 config manager (optional)
             **kwargs: Additional arguments to pass to KafkaProducer
         """
         self.boost_config = {}
-        if config_file:
-            with open(config_file, 'r') as f:
-                """NEEDS TO BE CHANGED"""
-                self.boost_config = json.load(f)
-
+        self.user_id = user_id
+        self.s3_config_manager = None
         
-        self.max_priority = self.boost_config.get('max_priority', 10)
-        self.default_priority = self.boost_config.get('default_priority', 0)
+        # Initialize configuration
+
+        try:
+            self.s3_config_manager = S3ConfigManager(user_id=user_id)
+            self.boost_config = self.s3_config_manager.get_full_config_for_producer()
+            print("✓ Producer initialized with S3ConfigManager")
+        except Exception as e:
+            print(f"Warning: Could not initialize S3ConfigManager: {str(e)}")
+               
         
         # Initialize the parent KafkaProducer with value serializer
         super().__init__(
@@ -89,7 +97,7 @@ class KafkaboostProducer(KafkaProducer):
         # Prepare message with priority
         message_dict = self._prepare_message(value, priority, topic)
         topic = self.check_and_change_topic_by_priority(topic, message_dict['priority'])
-        
+        print(f"Sending message to topic: {topic}")
         # Call parent's send method with the modified message
         return super().send(topic, value=message_dict, key=key, **kwargs)
     
@@ -107,17 +115,18 @@ class KafkaboostProducer(KafkaProducer):
         # Check if the message contains a role
         role = message_dict.get('role')
         if role:
-            for role_config in self.boost_config.get('Rule_Base_priority', []):
-                if role_config['role_name'] == role:
-                    return role_config['priority']
-        
+            if self.s3_config_manager:
+                role_priority = self.s3_config_manager.get_role_priority(role)
+                if role_priority is not None:
+                    return role_priority
+
         # If no role is found or no matching rule, check topic priority
-        for topic_config in self.boost_config.get('Topics_priority', []):
-            if topic_config['topic'] == topic:
-                return topic_config['priority']
-        
-        # If no matching topic, use default priority
-        return self.boost_config.get('default_priority', 0)
+        if self.s3_config_manager:
+            topic_priority = self.s3_config_manager.get_topic_priority_by_name(topic)
+            if topic_priority is not None:
+                return topic_priority
+
+        return self.s3_config_manager.get_default_priority()
     
     def check_and_change_topic_by_priority(self, topic: str, priority: int) -> str:
         """
@@ -130,22 +139,23 @@ class KafkaboostProducer(KafkaProducer):
         Returns:
             str: The modified topic name if priority boost applies, otherwise the original topic name
         """
-        priority_config = self.boost_config.get('Priority_boost',[])
-        for topic_entry in priority_config:
-            topic_name = topic_entry.get("topic_name")
-            min_priority = topic_entry.get("priority_boost_min_value", 0)
-            # Check if this topic matches the Priority_boost configuration
-            if topic_name == topic:
-                # If priority equals or exceeds the minimum value, change topic name
-                if priority >= min_priority:
-                    modified_topic = f"{topic_name}_{priority}"
-                    return modified_topic
-                break
+        if self.s3_config_manager:
+            min_priority = self.s3_config_manager.get_priority_boost_min_value(topic)
+            print(f"Min priority: {min_priority}")
+            print(f"Priority: {priority}")
+            print(f"Topic: {topic}")
+            
+            # Only route to priority-specific topic if there's actual priority boost config
+            # and the priority meets the minimum threshold
+            if min_priority > 0 and priority >= min_priority:
+                modified_topic = f"{topic}_{priority}"
+                return modified_topic
+ 
         
         # If no Priority_boost configuration found or priority doesn't meet threshold
         return topic
     
-
+   
       
     
  

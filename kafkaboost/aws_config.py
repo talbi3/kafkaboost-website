@@ -35,6 +35,12 @@ class AWSConfig:
         # Set Cognito Identity Pool ID for S3 path construction
         if 'aws_cognito_identity_pool_id' in self.config:
             os.environ['AWS_COGNITO_IDENTITY_POOL_ID'] = self.config['aws_cognito_identity_pool_id']
+        
+        # Set AWS credentials if they exist in config
+        if 'aws_access_key_id' in self.config:
+            os.environ['AWS_ACCESS_KEY_ID'] = self.config['aws_access_key_id']
+        if 'aws_secret_access_key' in self.config:
+            os.environ['AWS_SECRET_ACCESS_KEY'] = self.config['aws_secret_access_key']
     
     @classmethod
     def from_file(cls, file_path: str) -> 'AWSConfig':

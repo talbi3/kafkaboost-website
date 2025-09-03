@@ -2,11 +2,31 @@ import time
 import threading
 import uuid
 import logging
+import os
+import signal
+import sys
 from kafkaboost.producer import KafkaboostProducer
 from kafkaboost.consumer import KafkaboostConsumer
 from kafka.admin import KafkaAdminClient, NewTopic
 import json
 from kafkaboost.kafka_utils import KafkaConfigManager
+
+# Global list to track S3ConfigManager instances for cleanup
+s3_managers = []
+
+def signal_handler(sig, frame):
+    """Handle Ctrl+C to properly cleanup S3ConfigManager instances."""
+    print("\n🛑 Received interrupt signal. Cleaning up...")
+    for manager in s3_managers:
+        try:
+            manager.close()
+        except:
+            pass
+    print("✅ Cleanup completed. Exiting...")
+    sys.exit(0)
+
+# Register signal handler
+signal.signal(signal.SIGINT, signal_handler)
 
 # Disable Kafka connection logs
 logging.getLogger('kafka').setLevel(logging.WARNING)
@@ -19,6 +39,9 @@ TOPIC2 = "topic_2"
 BOOTSTRAP_SERVERS = "localhost:9092"
 GROUP_ID = f"priority_test_group_{uuid.uuid4()}"  # Unique group ID for each test run
 CONFIG_FILE = "/Users/noaalt/Projects/kafkaboost_repo/kafkaboost/tests/sample_config.json"
+
+# Get user ID from environment variable - use the actual user ID that has S3 config
+USER_ID = "5428b428-20a1-7051-114f-c24ede151b86"
 
 def clear_topics():
     """Clear all messages from the topics"""
@@ -53,7 +76,7 @@ def create_topics():
         admin_client.close()
 
 def producer_thread():
-    producer = KafkaboostProducer(bootstrap_servers=BOOTSTRAP_SERVERS, config_file=CONFIG_FILE)
+    producer = KafkaboostProducer(bootstrap_servers=BOOTSTRAP_SERVERS, user_id=USER_ID)
 
     messages = [
         {"data": "p10", "priority": 10},
@@ -78,7 +101,7 @@ def consumer_thread(received_messages):
         group_id=GROUP_ID,
         max_poll_records=500,
         consumer_timeout_ms=10000,
-        config_file=CONFIG_FILE,
+        user_id=USER_ID,
         auto_offset_reset='earliest'  # Start reading from the beginning
     )
 
@@ -133,7 +156,7 @@ def test_priority_order():
         print(msg)
 
 def producer_thread_multi_topic():
-    producer = KafkaboostProducer(bootstrap_servers=BOOTSTRAP_SERVERS, config_file=CONFIG_FILE)
+    producer = KafkaboostProducer(bootstrap_servers=BOOTSTRAP_SERVERS, user_id=USER_ID)
 
     messages_topic1 = [
         {"data": "topic1_p10", "priority": 10},
@@ -172,7 +195,7 @@ def consumer_thread_multi_topic(received_messages):
         group_id=GROUP_ID,
         max_poll_records=500,
         consumer_timeout_ms=10000,
-        config_file=CONFIG_FILE,
+        user_id=USER_ID,
         auto_offset_reset='earliest'  # Start reading from the beginning
     )
 
@@ -299,7 +322,7 @@ def test_priority_boost_topic_routing():
     ]
     
     # Send messages
-    producer = KafkaboostProducer(bootstrap_servers=BOOTSTRAP_SERVERS, config_file=CONFIG_FILE)
+    producer = KafkaboostProducer(bootstrap_servers=BOOTSTRAP_SERVERS, user_id=USER_ID)
     
     print("Sending test messages...")
     for msg in test_messages:
@@ -319,7 +342,8 @@ def test_priority_boost_topic_routing():
         topics=[PRIORITY_BOOST_TOPIC],
         group_id=f"test_base",
         auto_offset_reset='earliest',
-        consumer_timeout_ms=5000
+        consumer_timeout_ms=5000,
+        user_id=USER_ID
     )
     consumers[PRIORITY_BOOST_TOPIC] = base_consumer
     print("SUBSCRIPTION:", base_consumer.subscription()) 
@@ -333,7 +357,8 @@ def test_priority_boost_topic_routing():
             topics=[priority_topic],
             group_id=f"test_priority_{priority}_{uuid.uuid4()}",
             auto_offset_reset='earliest',
-            consumer_timeout_ms=5000
+            consumer_timeout_ms=5000,
+            user_id=USER_ID
         )
         consumers[priority_topic] = priority_consumer
         received_messages[priority_topic] = []
@@ -397,27 +422,47 @@ def test_priority_boost_topic_routing():
     print("✅ Messages with priority < 5 were routed to the base topic")
 
 def small_test():
-    print("opneing config file")
-    with open(CONFIG_FILE, 'r') as f:
-        config = json.load(f)
-    topics_priority = config.get('Topics_priority', [])
-    print(f"Topics priority: {topics_priority}")
-    Rule_Base_priority = config.get('Rule_Base_priority', [])
-    print(f"Rule base priority: {Rule_Base_priority}")
-    Priority_boost = config.get('Priority_boost', [])
-    print(f"Priority boost: {Priority_boost}")
+    print("Testing S3 config manager")
+    from kafkaboost.s3_config_manager import S3ConfigManager
+    
+    try:
+        s3_manager = S3ConfigManager(user_id=USER_ID, auto_save_local=True,
+        local_file_path="small_test.json", aws_config_file="kafkaboost/aws_config.json")
+        s3_managers.append(s3_manager)  # Track for cleanup
+        config = s3_manager.get_config()
+        
+        topics_priority = config.get('Topics_priority', [])
+        print(f"Topics priority: {topics_priority}")
+        Rule_Base_priority = config.get('Rule_Base_priority', [])
+        print(f"Rule base priority: {Rule_Base_priority}")
+        Priority_boost = config.get('Priority_boost', [])
+        print(f"Priority boost: {Priority_boost}")
+        
+        print("✅ S3 config manager test completed successfully")
+    except Exception as e:
+        print(f"❌ S3 config manager test failed: {e}")
+        # Fall back to file-based test
+        print("Falling back to file-based config test...")
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+        topics_priority = config.get('Topics_priority', [])
+        print(f"Topics priority: {topics_priority}")
+        Rule_Base_priority = config.get('Rule_Base_priority', [])
+        print(f"Rule base priority: {Rule_Base_priority}")
+        Priority_boost = config.get('Priority_boost', [])
+        print(f"Priority boost: {Priority_boost}")
 
 
 def test_find_matching_topics():
     """
-    Simple test to verify find_matching_topics works with the existing sample_config.json
+    Simple test to verify find_matching_topics works with the S3 config manager
     """
-    print("\n=== Testing find_matching_topics with sample_config.json ===")
+    print("\n=== Testing find_matching_topics with S3 config manager ===")
     
     try:
         print("starting.....")
-        # Initialize KafkaConfigManager with existing sample config
-        manager = KafkaConfigManager(BOOTSTRAP_SERVERS, CONFIG_FILE)
+        # Initialize KafkaConfigManager with S3 config manager
+        manager = KafkaConfigManager(BOOTSTRAP_SERVERS, user_id=USER_ID)
         assert manager.connect(), "Failed to connect to Kafka"
         
         # Use find_matching_topics to get all test_topic variants
@@ -434,7 +479,8 @@ def test_find_matching_topics():
                 topics=test_topic_variants,
                 group_id=f"test_find_matching_{uuid.uuid4()}",
                 auto_offset_reset='earliest',
-                consumer_timeout_ms=5000
+                consumer_timeout_ms=5000,
+                user_id=USER_ID
             )
             
             print(f"Consumer subscription: {consumer.subscription()}")
@@ -458,12 +504,21 @@ def test_find_matching_topics():
 
 
 if __name__ == "__main__":
-    # print("Running single topic test...")
-    # test_priority_order()
-    # print("\nRunning multi-topic test...")
-    # test_priority_order_multi_topic()
+    print("Running S3 config manager integration tests...")
+    
+    # print("\n=== Running small test (S3 config manager) ===")
     # small_test()
-    # print("\nRunning priority boost topic routing test...")
+    
+    # print("\n=== Running find_matching_topics test ===")
+    # test_find_matching_topics()
+    
+    # print("\n=== Running priority boost topic routing test ===")
     # test_priority_boost_topic_routing()
-    print("\nRunning find_matching_topics test...")
-    test_find_matching_topics()
+    
+    # print("\n=== Running single topic test ===")
+    # test_priority_order()
+    
+    print("\n=== Running multi-topic test ===")
+    test_priority_order_multi_topic()
+    
+    print("\n🎉 All tests completed!")

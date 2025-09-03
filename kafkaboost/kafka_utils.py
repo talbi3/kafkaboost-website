@@ -3,36 +3,33 @@ from kafka.errors import TopicAlreadyExistsError, NoBrokersAvailable
 import json
 from typing import Dict, List, Optional, Union
 import logging
+from .s3_config_manager import S3ConfigManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class KafkaConfigManager:
-    def __init__(self, bootstrap_servers: str, config_file: str):
+    def __init__(self, bootstrap_servers: str, user_id: Optional[str] = None):
         """
         Initialize the KafkaConfigManager.
         
         Args:
             bootstrap_servers: Kafka server address(es)
-            config_file: Path to the JSON configuration file
+            user_id: User ID for S3 config manager (optional)
+            use_s3_config: Whether to use S3 config manager (default: True)
         """
         self.bootstrap_servers = bootstrap_servers
-        self.config_file = config_file
-        self.config = self._load_config()
+        self.user_id = user_id
         self.admin_client = None
         
-    def _load_config(self) -> Dict:
-        """Load configuration from JSON file."""
+        # Initialize config manager
         try:
-            with open(self.config_file, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            logger.error(f"Configuration file not found: {self.config_file}")
-            raise
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON in configuration file: {self.config_file}")
-            raise
-            
+            self.config_manager = S3ConfigManager(user_id=user_id)
+            logger.info("✓ KafkaConfigManager initialized with S3ConfigManager")
+        except Exception as e:
+            logger.warning(f"Failed to initialize S3ConfigManager: {str(e)}")
+
+
     def connect(self) -> bool:
         """Establish connection to Kafka admin client."""
         try:
@@ -121,12 +118,16 @@ class KafkaConfigManager:
             if not self.connect():
                 return False
 
-        priority_config = self.config.get('Priority_boost', [])
-        if not priority_config:
-            logger.warning("No priority configuration found in config file")
-            return False
+        try:
+            priority_config = self.config_manager.get_priority_boost()
+            if not priority_config:
+                logger.warning("No priority configuration found in config")
+                return False
 
-        self.max_priority = self.config.get('max_priority', 10)
+            self.max_priority = self.config_manager.get_max_priority()
+        except Exception as e:
+            logger.error(f"Error accessing config manager: {str(e)}")
+            return False
 
         existing_topics = self._get_existing_topics()
 
@@ -212,6 +213,25 @@ class KafkaConfigManager:
         except Exception as e:
             logger.error(f"Error finding matching topics: {str(e)}")
             return {base_topic: [] for base_topic in base_topic_list}
+    
+    def get_config_summary(self) -> dict:
+        """
+        Get a summary of the current configuration.
+        
+        Returns:
+            Dictionary with configuration summary
+        """
+        if self.config_manager:
+            return self.config_manager.get_config_summary()
+        else:
+            return {
+                'config_source': 'none',
+                'max_priority': 10,
+                'default_priority': 0,
+                'topics_count': 0,
+                'rules_count': 0,
+                'boost_configs_count': 0
+            }
             
     def close(self):
         """Close the admin client connection."""

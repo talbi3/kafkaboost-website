@@ -12,7 +12,7 @@ def main():
     # Step 1: Load AWS configuration to set environment variables
     print("\n1. Loading AWS configuration...")
     try:
-        aws_config = AWSConfig.from_file('aws_config.json')
+        aws_config = AWSConfig.from_file('kafkaboost/aws_config.json')
         print("✅ AWS configuration loaded successfully")
         print(f"   S3 Bucket: {aws_config.get_s3_bucket()}")
         print(f"   Region: {aws_config.get_region()}")
@@ -27,7 +27,7 @@ def main():
     s3_manager = S3ConfigManager(
         user_id=user_id,
         auto_save_local=True,
-        local_file_path="test_user_config.json"
+        local_file_path="Noa_config.json"
     )
     
     print(f"✅ S3ConfigManager created successfully!")
@@ -61,7 +61,8 @@ def main():
     print(f"\n4. Testing without user ID...")
     s3_manager_default = S3ConfigManager(
         auto_save_local=True,
-        local_file_path="test_default_config.json"
+        local_file_path="test_default_config.json",
+        aws_config_file="kafkaboost/aws_config.json"
     )
     
     print(f"✅ Default S3ConfigManager created!")
